@@ -46,11 +46,27 @@ function frame(now) {
 }
 
 // ---------- режим камеры ----------
+// Цвет машины: усредняем пиксели капота (середина рамки, чуть ниже лобового стекла)
+const probe = document.createElement('canvas');
+probe.width = probe.height = 8;
+const probeCtx = probe.getContext('2d', { willReadFrequently: true });
+function sampleColor([x, y, w, h]) {
+  try {
+    probeCtx.drawImage(video, x + w * 0.25, y + h * 0.4, w * 0.5, h * 0.22, 0, 0, 8, 8);
+    const d = probeCtx.getImageData(0, 0, 8, 8).data;
+    const rgb = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4) { rgb[0] += d[i]; rgb[1] += d[i + 1]; rgb[2] += d[i + 2]; }
+    return rgb.map((v) => v / 64);
+  } catch {
+    return null;
+  }
+}
+
 async function cameraLoop() {
   while (mode === 'camera' && detector.running) {
     try {
       rawDets = await detector.detect(cfg.minScore);
-      objects = tracker.update(rawDets, performance.now() / 1000, video.videoWidth, video.videoHeight, cfg);
+      objects = tracker.update(rawDets, performance.now() / 1000, video.videoWidth, video.videoHeight, cfg, sampleColor);
       drawOverlay(el('overlay'), video, objects);
     } catch (e) {
       status('Ошибка распознавания: ' + e.message);
@@ -113,7 +129,12 @@ el('fsBtn').addEventListener('click', () => {
 el('simbar').addEventListener('click', (e) => {
   switch (e.target.dataset.spawn) {
     case 'car': sim.spawnCar(cfg); break;
-    case 'reckless': sim.spawnCar(cfg, { reckless: true }); break;
+    case 'moto': sim.spawnCar(cfg, { type: 'moto' }); break;
+    case 'reckless': sim.spawnCar(cfg, { type: 'reckless' }); break;
+    case 'red': sim.spawnCar(cfg, { type: 'red' }); break;
+    case 'weaving': sim.spawnCar(cfg, { type: 'weaving' }); break;
+    case 'jam': sim.spawnJam(cfg); break;
+    case 'moose': sim.spawnAnimal(cfg, { large: true }); break;
     case 'person': sim.spawnPerson(cfg); break;
     case 'jaywalker': sim.spawnPerson(cfg, { obey: false }); break;
     case 'animal': sim.spawnAnimal(cfg); break;
@@ -148,6 +169,7 @@ el('startCam').addEventListener('click', () => start(true));
 const FIELDS = [
   ['lanes', 'Число полос', { min: 1, max: 6, step: 1 }],
   ['laneWidth', 'Ширина полосы, м', { min: 2.5, max: 4.5, step: 0.25 }],
+  ['speedLimit', 'Ограничение скорости, км/ч', { min: 10, max: 130, step: 10 }],
   ['boardDistance', 'Табло водителя — за сколько метров до перехода', { min: 20, max: 500, step: 10 }],
   ['camToCross', 'От камеры до перехода, м', { min: 0, max: 50, step: 1 }],
   ['camSide', 'Камера у обочины (для водителя)', { options: { right: 'правой', left: 'левой' } }],

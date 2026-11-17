@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assess, laneOf, zoneOf, stoppingDistance, crossingTime } from '../js/logic.js';
+import { assess, laneOf, zoneOf, stoppingDistance, crossingTime, colorName, updateWeaving } from '../js/logic.js';
 import { DEFAULTS } from '../js/settings.js';
-import { locate, focalPx, Tracker } from '../js/tracker.js';
+import { locate, focalPx, Tracker, mergeRiders } from '../js/tracker.js';
 import { Simulator } from '../js/sim.js';
 
 const cfg = { ...DEFAULTS };
@@ -104,10 +104,107 @@ test('трекер: оценивает скорость приближающей
 
 test('симуляция: машина останавливается перед пешеходом', () => {
   const sim = new Simulator();
-  sim.spawnCar(cfg);
+  sim.spawnCar(cfg, { kmh: 50 });
   sim.objects.push({ id: 99, kind: 'person', label: 'Пешеход', s: 0, u: 3.5, vs: 0, vu: 0, dir: 1, speed: 0, obey: false, state: 'go', wait: 0 });
   for (let i = 0; i < 60 * 40; i++) sim.step(1 / 60, cfg, 'clear');
   const c = sim.objects.find((o) => o.kind === 'vehicle');
   assert.ok(c.s > 2 && c.s < 8, `s=${c.s}`);
   assert.ok(c.vs < 0.5);
+});
+
+test('много машин: на табло самая опасная, считается число превышающих', () => {
+  const objs = [
+    { ...car(40, 30), id: 1 },      // близко, едет нормально — 4.8 с
+    { ...car(150, 90), id: 2 },     // далеко, превышает
+    { ...car(170, 50), id: 3 },
+  ];
+  const r = assess(objs, cfg);
+  assert.equal(r.ped.level, 'danger');
+  assert.equal(r.ped.vehicle.id, 1);
+  assert.equal(r.ped.traffic.moving, 3);
+  assert.equal(r.ped.traffic.speeding, 1);
+});
+
+test('опасный водитель повышает уровень тревоги', () => {
+  // 15.3 с до перехода: обычная машина — «далеко»
+  assert.equal(assess([car(170, 40)], cfg).ped.level, 'info');
+  assert.equal(assess([{ ...car(170, 40), ranRed: true }], cfg).ped.level, 'warn');
+  assert.equal(assess([{ ...car(170, 40), weaving: true }], cfg).ped.level, 'warn');
+  const r = assess([{ ...car(175, 95), color: 'красный' }], cfg); // 6.6 с, грубое превышение
+  assert.equal(r.ped.level, 'danger');
+  assert.equal(r.ped.vehicle.speeding, true);
+  assert.equal(r.ped.vehicle.color, 'красный');
+});
+
+test('пробка: ползущие машины дают «внимание», а не «стойте»', () => {
+  const jam = [10, 20, 30, 40].map((s, i) => ({ ...car(s, 5), id: i + 1 }));
+  const r = assess(jam, cfg);
+  assert.equal(r.ped.traffic.jam, true);
+  assert.equal(r.ped.level, 'warn');
+  const still = assess(jam.map((c) => ({ ...c, vs: 0 })), cfg);
+  assert.equal(still.ped.level, 'clear');
+  assert.equal(still.ped.traffic.jam, true);
+  assert.equal(still.ped.traffic.stopped, 4);
+});
+
+test('водитель: превышение без пешехода и крупное животное', () => {
+  const r = assess([car(120, 90)], cfg);
+  assert.equal(r.drv.level, 'caution');
+  assert.equal(r.drv.speeding, true);
+  assert.equal(assess([car(120, 50)], cfg).drv.level, 'clear');
+  const moose = assess([{ id: 7, kind: 'animal', label: 'Лось', large: true, s: 30, u: 2, vs: 0, vu: 0 }], cfg);
+  assert.equal(moose.drv.target.large, true);
+  assert.equal(moose.drv.target.distance, 70);
+});
+
+test('цвет машины', () => {
+  assert.equal(colorName([220, 30, 30]), 'красный');
+  assert.equal(colorName([245, 245, 245]), 'белый');
+  assert.equal(colorName([20, 20, 22]), 'чёрный');
+  assert.equal(colorName([40, 80, 200]), 'синий');
+  assert.equal(colorName([170, 175, 180]), 'серебристый');
+  assert.equal(colorName([90, 92, 95]), 'серый');
+  assert.equal(colorName([240, 200, 30]), 'жёлтый');
+});
+
+test('виляние: зигзаг — да, перестроение — нет', () => {
+  const zig = { u: 1.75 };
+  let w = false;
+  for (let t = 0; t < 6; t += 0.1) { zig.u = 1.75 + Math.sin((2 * Math.PI * t) / 2.4); w = updateWeaving(zig, t); }
+  assert.equal(w, true);
+  const lc = { u: 1.75 };
+  for (let t = 0; t < 6; t += 0.1) { lc.u = 1.75 + 3.5 * Math.min(1, t / 3); w = updateWeaving(lc, t); }
+  assert.equal(w, false);
+});
+
+test('мотоциклист: седок склеивается с мотоциклом и не считается пешеходом', () => {
+  const dets = [
+    { class: 'motorcycle', score: 0.7, bbox: [300, 300, 80, 100] },
+    { class: 'person', score: 0.8, bbox: [310, 240, 60, 140] },
+    { class: 'person', score: 0.9, bbox: [600, 200, 60, 200] },
+  ];
+  const out = mergeRiders(dets);
+  assert.equal(out.length, 2);
+  assert.deepEqual(out[0].bbox, [300, 240, 80, 160]);
+  assert.equal(out[0].class, 'motorcyclist');
+  assert.equal(out[1].class, 'person');
+  const tr = new Tracker();
+  tr.update(dets, 0, 1280, 720, cfg);
+  const objs = tr.update(dets, 0.1, 1280, 720, cfg);
+  assert.deepEqual(objs.map((o) => o.label).sort(), ['Мотоциклист', 'Пешеход']);
+});
+
+test('симуляция: виляющая машина распознаётся', () => {
+  const sim = new Simulator();
+  sim.spawnCar(cfg, { type: 'weaving', kmh: 40 });
+  for (let i = 0; i < 60 * 7; i++) sim.step(1 / 60, cfg, 'clear');
+  assert.equal(sim.objects[0].weaving, true);
+});
+
+test('опасный водитель виден на табло, даже если ближе другая машина', () => {
+  const r = assess([{ ...car(40, 30), id: 1 }, { ...car(150, 45), id: 2, weaving: true, color: 'синий' }], cfg);
+  assert.equal(r.ped.vehicle.id, 1);
+  assert.equal(r.ped.hazard.id, 2);
+  assert.equal(r.ped.hazard.weaving, true);
+  assert.equal(assess([{ ...car(150, 45), id: 2, weaving: true }], cfg).ped.hazard, null);
 });

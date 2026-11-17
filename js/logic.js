@@ -32,50 +32,114 @@ export function laneOf(u, cfg) {
 }
 
 const MOVING = 0.5; // м/с — ниже считаем, что машина стоит
+const SLOW = 2.8;   // м/с (10 км/ч) — «ползёт», как в пробке
+const LEVELS = ['clear', 'info', 'warn', 'danger'];
+
+// ---------- Цвет машины ----------
+// [r, g, b] 0..255 → русское название (мужской род: «красный автомобиль»)
+export function colorName([r, g, b]) {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const d = max - min;
+  const sat = max ? d / max : 0;
+  if (max < 0.2) return 'чёрный';
+  if (sat < 0.18) return max > 0.8 ? 'белый' : max > 0.5 ? 'серебристый' : 'серый';
+  let h;
+  if (max === r / 255) h = ((g - b) / 255 / d) % 6;
+  else if (max === g / 255) h = (b - r) / 255 / d + 2;
+  else h = (r - g) / 255 / d + 4;
+  h = (h * 60 + 360) % 360;
+  if (h < 15 || h >= 335) return 'красный';
+  if (h < 45) return max < 0.55 ? 'коричневый' : 'оранжевый';
+  if (h < 70) return 'жёлтый';
+  if (h < 165) return 'зелёный';
+  if (h < 200) return 'голубой';
+  if (h < 260) return 'синий';
+  return 'фиолетовый';
+}
+
+// ---------- Виляние ----------
+// Считает развороты поперечного движения с размахом от 0,5 м. Три и больше
+// разворотов за 6 секунд — машина виляет (одно перестроение сюда не попадает).
+// Состояние хранится в самом объекте (o._lat). Возвращает true/false.
+export function updateWeaving(o, t) {
+  const SWING = 0.5;
+  const h = (o._lat ||= { ext: o.u, dir: 0, turns: [] });
+  if (h.dir === 0) {
+    if (Math.abs(o.u - h.ext) >= SWING) { h.dir = Math.sign(o.u - h.ext); h.ext = o.u; }
+  } else if ((o.u - h.ext) * h.dir > 0) {
+    h.ext = o.u;
+  } else if (Math.abs(o.u - h.ext) >= SWING) {
+    h.turns.push(t);
+    h.dir = -h.dir;
+    h.ext = o.u;
+  }
+  h.turns = h.turns.filter((x) => t - x <= 6);
+  return h.turns.length >= 3;
+}
 
 export function assess(objects, cfg) {
   const vehicles = objects.filter((o) => o.kind === 'vehicle' && o.s > -2);
   const beings = objects.filter((o) => o.kind === 'person' || o.kind === 'animal');
   const tCross = crossingTime(cfg);
+  const need = tCross + cfg.margin;
 
   // ---------- Табло пешехода ----------
+  // Каждая приближающаяся машина оценивается отдельно, на табло — самая опасная.
   let threat = null;
+  let hazard = null; // ближайший опасный водитель — показывается, даже если главная угроза не он
+  let moving = 0;
+  let speedingCount = 0;
   for (const v of vehicles) {
     if (v.vs <= MOVING || v.s <= 0) continue;
+    moving++;
     const ttc = v.s / v.vs;
-    if (!threat || ttc < threat.ttc) {
-      threat = {
-        id: v.id,
-        label: v.label,
-        distance: v.s,
-        speedKmh: v.vs * KMH,
-        ttc,
-        canStop: stoppingDistance(v.vs, cfg) < v.s,
+    const speedKmh = v.vs * KMH;
+    const canStop = stoppingDistance(v.vs, cfg) < v.s;
+    const speeding = speedKmh > cfg.speedLimit + 5;
+    if (speeding) speedingCount++;
+    // опасное вождение: проехал на красный, виляет или грубо превышает
+    const reckless = !!v.ranRed || !!v.weaving || speedKmh > cfg.speedLimit + 20;
+
+    let lvl = ttc < need || !canStop ? 3 : ttc < need + 5 ? 2 : 1;
+    if (v.vs < SLOW) lvl = Math.min(lvl, 2);                 // ползущая машина — не «стойте», а «внимание»
+    if (reckless && lvl < 3 && ttc < need + 15) lvl++;       // опасному водителю доверяем меньше
+
+    const info = {
+        id: v.id, label: v.label, color: v.color || null, colorCss: v.colorCss || null,
+        distance: v.s, speedKmh, ttc, canStop, lvl,
+        speeding, weaving: !!v.weaving, ranRed: !!v.ranRed, reckless,
         u: v.u,
         // куда машина приедет на линии перехода (прогноз траектории)
         uAtCross: v.u + (v.vu || 0) * ttc,
         lane: laneOf(v.u, cfg),
-      };
-    }
+    };
+    if (!threat || lvl > threat.lvl || (lvl === threat.lvl && ttc < threat.ttc)) threat = info;
+    if (reckless && (!hazard || ttc < hazard.ttc)) hazard = info;
   }
-  const stopped = vehicles.some((v) => v.vs <= MOVING && v.s >= 0 && v.s < 20);
+  const near = vehicles.filter((v) => v.s >= 0 && v.s < 100);
+  const slowNear = near.filter((v) => v.vs < SLOW);
+  const stoppedCount = near.filter((v) => v.vs <= MOVING).length;
   const peopleOnRoad = beings.some(
     (b) => b.kind === 'person' && zoneOf(b.u, cfg) === 'road' && Math.abs(b.s) < 8,
   );
 
-  let pedLevel = 'clear';
-  if (threat) {
-    if (threat.ttc < tCross + cfg.margin || !threat.canStop) pedLevel = 'danger';
-    else if (threat.ttc < tCross + cfg.margin + 5) pedLevel = 'warn';
-    else pedLevel = 'info';
-  }
+  const pedLevel = threat ? LEVELS[threat.lvl] : 'clear';
   const ped = {
     level: pedLevel,
     critical: pedLevel === 'danger' && peopleOnRoad,
     vehicle: threat,
-    stopped,
+    hazard: hazard && hazard.id !== threat.id ? hazard : null,
+    stopped: stoppedCount > 0,
     crossTime: tCross,
     peopleOnRoad,
+    traffic: {
+      moving,
+      speeding: speedingCount,
+      stopped: stoppedCount,
+      // пробка: рядом три и больше машин, и почти все стоят или ползут
+      jam: slowNear.length >= 3 && slowNear.length >= near.length * 0.6,
+    },
   };
 
   // ---------- Табло водителя ----------
@@ -88,6 +152,7 @@ export function assess(objects, cfg) {
       id: b.id,
       kind: b.kind,
       label: b.label,
+      large: !!b.large,
       zone,
       lane: laneOf(b.u, cfg),
       side: b.u < 0 ? 'right' : 'left', // для зоны 'roadside': у какой обочины
@@ -102,26 +167,28 @@ export function assess(objects, cfg) {
     if (better) target = cand;
   }
 
+  // ближайшая машина, которая ещё не доехала до цели (или до перехода, если цели нет)
+  const ref = target ? target.s : 0;
+  let nearest = null;
+  for (const v of vehicles) {
+    const gap = v.s - ref;
+    if (gap <= 0 || v.vs <= MOVING) continue;
+    if (!nearest || gap < nearest.gap) nearest = { gap, v: v.vs };
+  }
+  const vehicleSpeedKmh = nearest ? nearest.v * KMH : null;
+  const speeding = nearest ? vehicleSpeedKmh > cfg.speedLimit + 5 : false;
+
   let drvLevel = 'clear';
-  let vehicleSpeedKmh = null;
   if (target) {
     drvLevel = target.zone === 'road' ? 'warn' : 'caution';
-    // ближайшая машина, которая ещё не доехала до цели
-    let nearest = null;
-    for (const v of vehicles) {
-      const gap = v.s - target.s;
-      if (gap <= 0 || v.vs <= MOVING) continue;
-      if (!nearest || gap < nearest.gap) nearest = { gap, v: v.vs };
+    // спокойного торможения (3 м/с²) уже не хватает — пора тормозить всерьёз
+    if (nearest && target.zone === 'road' && stoppingDistance(nearest.v, cfg, 3) > nearest.gap) {
+      drvLevel = 'brake';
     }
-    if (nearest) {
-      vehicleSpeedKmh = nearest.v * KMH;
-      // спокойного торможения (3 м/с²) уже не хватает — пора тормозить всерьёз
-      if (target.zone === 'road' && stoppingDistance(nearest.v, cfg, 3) > nearest.gap) {
-        drvLevel = 'brake';
-      }
-    }
+  } else if (speeding) {
+    drvLevel = 'caution';
   }
-  const drv = { level: drvLevel, target, vehicleSpeedKmh };
+  const drv = { level: drvLevel, target, vehicleSpeedKmh, speeding };
 
   return { ped, drv };
 }

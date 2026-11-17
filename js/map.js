@@ -19,8 +19,8 @@ export function drawMap(canvas, objects, result, cfg, { range, showCamera }) {
 
   const w = roadWidth(cfg);
   const sMin = -12;
-  const roadPx = Math.min(cw * 0.42, 150);
-  const x0 = (cw - roadPx) / 2;
+  const roadPx = Math.min(cw * 0.36, 150);
+  const x0 = Math.min(64, (cw - roadPx) / 2); // дорога слева — справа место для подписей
   const X = (u) => x0 + (u / w) * roadPx;
   const Y = (s) => ch - 8 - ((s - sMin) / (range - sMin)) * (ch - 16);
 
@@ -66,9 +66,8 @@ export function drawMap(canvas, objects, result, cfg, { range, showCamera }) {
   g.textAlign = 'left';
   if (cfg.boardDistance <= range) {
     g.fillStyle = '#ffc21a';
-    g.fillRect(x0 - 26, Y(cfg.boardDistance) - 14, 20, 9);
-    g.fillText('табло водителя', x0 + roadPx + 10, Y(cfg.boardDistance));
-    g.fillRect(x0 + roadPx + 2, Y(cfg.boardDistance), 6, 1);
+    g.fillRect(x0 + roadPx + 4, Y(cfg.boardDistance) - 5, 16, 9);
+    g.fillText('табло водителя', x0 + roadPx + 26, Y(cfg.boardDistance));
   }
   if (showCamera) {
     const cx = X(camU(cfg));
@@ -92,22 +91,33 @@ export function drawMap(canvas, objects, result, cfg, { range, showCamera }) {
     g.setLineDash([]);
   }
 
-  for (const o of objects) {
+  let lastLabelY = -Infinity;
+  for (const o of [...objects].sort((a, b) => b.s - a.s)) {
     if (o.s > range || o.s < sMin) continue;
     const x = Math.max(8, Math.min(cw - 8, X(o.u)));
     const y = Y(o.s);
     if (o.kind === 'vehicle') {
       const isThreat = threat && threat.id === o.id;
-      g.fillStyle = isThreat ? COLORS[result.ped.level] : '#9fb2c0';
+      const moto = o.cls === 'motorcyclist' || o.cls === 'motorcycle' || o.cls === 'cyclist' || o.cls === 'bicycle';
+      g.fillStyle = o.colorCss || '#9fb2c0';
       g.beginPath();
-      g.roundRect(x - 7, y - 12, 14, 24, 4);
+      if (moto) g.roundRect(x - 3.5, y - 10, 7, 20, 3);
+      else g.roundRect(x - 7, y - 12, 14, 24, 4);
       g.fill();
-      g.fillStyle = '#e6edf2';
+      g.lineWidth = isThreat ? 3 : 1;
+      g.strokeStyle = isThreat ? COLORS[result.ped.level] : '#000';
+      g.stroke();
+      const flags = [o.ranRed && 'красный свет', o.weaving && 'виляет',
+        o.vs * 3.6 > cfg.speedLimit + 5 && 'превышение'].filter(Boolean);
+      g.fillStyle = flags.length ? '#ff6b61' : '#e6edf2';
       g.textAlign = 'left';
-      g.fillText(`${Math.round(o.vs * 3.6)} км/ч`, x0 + roadPx + 10, y);
+      // в плотном потоке подписываем не каждую машину, чтобы подписи не слипались
+      if (y - lastLabelY < 13 && !flags.length && !isThreat) continue;
+      lastLabelY = y;
+      g.fillText(`${Math.round(o.vs * 3.6)} км/ч${flags.length ? ' · ' + flags.join(', ') : ''}`, x0 + roadPx + 10, y);
     } else {
       g.fillStyle = o.kind === 'person' ? '#ffffff' : '#ff9f0a';
-      g.beginPath(); g.arc(x, y, 5.5, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(x, y, o.large ? 8 : 5.5, 0, Math.PI * 2); g.fill();
       g.strokeStyle = '#000'; g.lineWidth = 1.5; g.stroke();
     }
   }
@@ -133,7 +143,7 @@ export function drawOverlay(canvas, video, objects) {
     g.strokeRect(x, y, w, h);
     const dist = Math.max(0, o.s).toFixed(o.s < 20 ? 1 : 0);
     const text = o.kind === 'vehicle'
-      ? `${o.label} ${dist} м · ${Math.round(Math.max(0, o.vs) * 3.6)} км/ч`
+      ? `${o.color ? o.color + ' ' : ''}${o.label} ${dist} м · ${Math.round(Math.max(0, o.vs) * 3.6)} км/ч${o.weaving ? ' · виляет' : ''}`
       : `${o.label} ${dist} м`;
     const tw = g.measureText(text).width + 8 * k;
     g.fillStyle = color;
