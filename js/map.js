@@ -64,11 +64,6 @@ export function drawMap(canvas, objects, result, cfg, { range, showCamera }) {
 
   // табло водителя и камера
   g.textAlign = 'left';
-  if (cfg.boardDistance <= range) {
-    g.fillStyle = '#ffc21a';
-    g.fillRect(x0 + roadPx + 4, Y(cfg.boardDistance) - 5, 16, 9);
-    g.fillText('табло водителя', x0 + roadPx + 26, Y(cfg.boardDistance));
-  }
   if (showCamera) {
     const cx = X(camU(cfg));
     const cy = Y(-cfg.camToCross);
@@ -120,6 +115,17 @@ export function drawMap(canvas, objects, result, cfg, { range, showCamera }) {
       g.beginPath(); g.arc(x, y, o.large ? 8 : 5.5, 0, Math.PI * 2); g.fill();
       g.strokeStyle = '#000'; g.lineWidth = 1.5; g.stroke();
     }
+  }
+  g.textAlign = 'left';
+  if (cfg.boardDistance <= range) {
+    g.fillStyle = '#ffc21a';
+    g.fillRect(x0 + roadPx + 4, Y(cfg.boardDistance) - 5, 16, 9);
+    const by = Y(cfg.boardDistance);
+    const tw = g.measureText('табло водителя').width;
+    g.fillStyle = 'rgba(16,22,27,.85)';
+    g.fillRect(x0 + roadPx + 24, by - 8, tw + 4, 16);
+    g.fillStyle = '#ffc21a';
+    g.fillText('табло водителя', x0 + roadPx + 26, by);
   }
 }
 

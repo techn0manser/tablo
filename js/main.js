@@ -266,6 +266,8 @@ el('simbar').addEventListener('click', (e) => {
     case 'hit': sim.spawnHit(cfg); break;
     case 'moose': sim.spawnAnimal(cfg, { large: true }); break;
     case 'person': sim.spawnPerson(cfg); break;
+    case 'group': sim.spawnGroup(cfg); break;
+    case 'herd': sim.spawnHerd(cfg); break;
     case 'jaywalker': sim.spawnPerson(cfg, { obey: false }); break;
     case 'animal': sim.spawnAnimal(cfg); break;
     case 'clear': sim.clear(); if (incident) closeIncident(); break;
