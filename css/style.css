@@ -67,6 +67,7 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .board {
   --c: var(--green);
   container-type: size;
+  position: relative;
   background: #000; border: 3px solid #23292e; border-radius: 14px;
   display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
   padding: 2cqh 3cqw; text-align: center; overflow: hidden; min-height: 0;
@@ -76,7 +77,7 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .board > * { text-shadow: 0 0 .35em color-mix(in srgb, var(--c) 55%, transparent); }
 .board[data-level=warn], .board[data-level=caution] { --c: var(--amber); }
 .board[data-level=danger], .board[data-level=critical], .board[data-level=brake] { --c: var(--red); }
-.board[data-level=danger], .board[data-level=critical], .board[data-level=brake] { border-color: var(--red); }
+.board[data-level=danger], .board[data-level=critical], .board[data-level=brake], .board[data-level=incident] { border-color: var(--red); }
 
 .board-title { font-size: min(3.2cqw, 4cqh); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #5d6870; text-shadow: none; }
 .headline { font-size: min(12cqw, 19cqh); line-height: 1; letter-spacing: .02em; }
@@ -135,3 +136,32 @@ dialog h2 { margin: 0 0 10px; font-size: 18px; }
 .field { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .field input, .field select { width: 96px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
 .dlg-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+/* ---------- происшествие ---------- */
+.report { font-size: min(3cqw, 4cqh); padding: .35em .9em; color: #9aa7b0; background: #12171b; border-color: #2a333b; font-weight: 500; text-shadow: none; }
+.incident {
+  position: absolute; inset: 0; background: #000; border-radius: 11px;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
+  padding: 2cqh 4cqw; color: var(--red); text-shadow: 0 0 .35em rgba(255,59,48,.55);
+}
+.inc-head { font-size: min(17cqw, 22cqh); line-height: 1; animation: blink 1s infinite; }
+.inc-cause { font-size: min(5.6cqw, 8cqh); line-height: 1.15; }
+.inc-detail { font-size: min(3.6cqw, 5cqh); font-weight: 600; color: #e6edf2; text-shadow: none; }
+.inc-call {
+  font-size: min(5.4cqw, 8cqh); font-weight: 800; padding: .55em .9em; border-radius: .5em;
+  background: var(--red); border-color: #fff; color: #fff; white-space: normal; text-shadow: none;
+  box-shadow: 0 0 24px rgba(255,59,48,.6);
+}
+.inc-status { font-size: min(4.6cqw, 6.5cqh); color: var(--green); text-shadow: 0 0 .35em rgba(61,255,122,.5); }
+.inc-foot { display: flex; flex-wrap: wrap; gap: .8em; align-items: center; justify-content: center; font-size: min(2.9cqw, 4cqh); font-weight: 500; color: #7c8a94; text-shadow: none; }
+.inc-foot button { font-size: inherit; padding: .35em .8em; color: #c9d3da; }
+
+/* ---------- журнал ---------- */
+.log { max-height: 60vh; overflow-y: auto; font-size: 13px; }
+.log-row { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.log-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.log-row b { font-weight: 600; }
+.log-row b.bad { color: var(--red); }
+.log-row b.good { color: var(--green); }
+.log-row span { grid-column: 2; color: #c9d3da; }
+.log-empty { color: var(--muted); padding: 12px 0; }

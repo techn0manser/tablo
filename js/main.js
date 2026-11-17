@@ -3,7 +3,9 @@ import { assess } from './logic.js';
 import { Simulator, SPAWN_S } from './sim.js';
 import { Tracker, CLASSES } from './tracker.js';
 import { Detector } from './detector.js';
-import { Beeper } from './audio.js';
+import { Beeper, Voice } from './audio.js';
+import { detectCollision, makeIncident, notifyServices, incidentDetail, incidentSpeech } from './incident.js';
+import { Journal } from './journal.js';
 import { renderPedBoard, renderDrvBoard } from './boards.js';
 import { drawMap, drawOverlay } from './map.js';
 
@@ -20,6 +22,71 @@ const sim = new Simulator();
 const tracker = new Tracker();
 const detector = new Detector(video);
 const beeper = new Beeper();
+const voice = new Voice();
+const journal = new Journal();
+
+// ---------- происшествия ----------
+let incident = null;     // текущее ДТП или null
+let quietUntil = 0;      // после устранения какое-то время не ищем новое
+
+function callServices(by) {
+  if (!incident || incident.notified) return;
+  notifyServices(incident, by);
+  journal.add('Оповещение', `${incident.services} оповещены ${by === 'auto' ? 'автоматически' : 'по нажатию на табло'} (макет)`);
+  if (cfg.voice) voice.say(incidentSpeech(incident), 0);
+}
+
+function openIncident(c) {
+  incident = makeIncident(c, cfg);
+  journal.add('ДТП', [incident.cause, incidentDetail(incident)].filter(Boolean).join('. '));
+  if (cfg.notifyMode === 'auto') callServices('auto');
+}
+
+function closeIncident() {
+  if (!incident) return;
+  journal.add('Устранено', 'Происшествие устранено, движение восстановлено');
+  incident = null;
+  quietUntil = performance.now() + 8000;
+  sim.clearIncident();
+  voice.stop();
+}
+
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+// Нарушения и опасные ситуации — в журнал, по одному разу на машину
+function logViolations() {
+  for (const o of objects) {
+    if (o.kind !== 'vehicle' || o.s <= 0 || o.vs < 0.5) continue;
+    const who = cap([o.color, o.label].filter(Boolean).join(' ').toLowerCase());
+    const kmh = Math.round(o.vs * 3.6);
+    const k = `${mode}:${o.id}`;
+    if (kmh > cfg.speedLimit + 5) journal.add('Превышение', `${who}: ${kmh} км/ч при ограничении ${cfg.speedLimit}`, { key: k + ':speed' });
+    if (o.weaving) journal.add('Опасное вождение', `${who} виляет, ${kmh} км/ч`, { key: k + ':weave' });
+    if (o.ranRed) journal.add('Красный свет', `${who} проехал на красный, ${kmh} км/ч`, { key: k + ':red' });
+  }
+  const v = result.ped.vehicle;
+  if (result.ped.critical && v) {
+    journal.add('Опасное сближение', `Пешеход на дороге, ${[v.color, v.label].filter(Boolean).join(' ').toLowerCase()} ${Math.round(v.speedKmh)} км/ч в ${Math.round(v.distance)} м`,
+      { key: `${mode}:${v.id}:critical` });
+  }
+}
+
+// Голос: объявляем при смене ситуации, при ДТП повторяем раз в 20 секунд
+let voiceKey = '';
+function speak() {
+  if (!cfg.voice) return;
+  if (incident) { voice.say(incidentSpeech(incident), 20); voiceKey = 'incident'; return; }
+  const { level, critical, vehicle: v } = result.ped;
+  const key = critical ? 'critical' : `${level}:${v?.reckless ? v.id : ''}`;
+  if (key === voiceKey) return;
+  voiceKey = key;
+  if (critical) voice.say('Опасность! Немедленно освободите дорогу!');
+  else if ((level === 'warn' || level === 'danger') && v.reckless) {
+    const why = v.ranRed ? 'Проехал на красный свет' : v.weaving ? 'Автомобиль виляет' : 'Сильно превышает скорость';
+    voice.say(`Внимание! Опасный водитель. ${why}. Не выходите на дорогу.`);
+  } else if (level === 'danger') voice.say('Стойте! Автомобиль близко.');
+  else if (level === 'warn') voice.say('Внимание. Приближается автомобиль.');
+}
 const status = (text) => { el('status').textContent = text; };
 
 // ---------- главный цикл ----------
@@ -30,8 +97,19 @@ function frame(now) {
   if (mode === 'sim') objects = sim.step(dt, cfg, result.ped.level);
   result = assess(objects, cfg);
 
-  renderPedBoard(el('pedBoard'), result.ped);
-  renderDrvBoard(el('drvBoard'), result.drv, cfg);
+  if (!incident && now > quietUntil) {
+    const c = detectCollision(objects, cfg, { vehicles: mode === 'sim' });
+    if (c) {
+      openIncident(c);
+      if (mode === 'sim') sim.applyCollision(c);
+    }
+  }
+  // в авто-симуляции происшествие «устраняется» само, чтобы показ не застревал
+  if (incident && mode === 'sim' && sim.auto && Date.now() - incident.time > 40000) closeIncident();
+  logViolations();
+
+  renderPedBoard(el('pedBoard'), result.ped, incident);
+  renderDrvBoard(el('drvBoard'), result.drv, cfg, incident);
   if (!el('debug').classList.contains('off')) {
     drawMap(el('map'), objects, result, cfg, {
       range: mode === 'sim' ? SPAWN_S : 60,
@@ -40,8 +118,9 @@ function frame(now) {
   }
 
   const { level, critical } = result.ped;
-  const snd = critical ? 'critical' : level === 'danger' ? 'danger' : level === 'warn' ? 'warn' : 'off';
+  const snd = incident ? 'incident' : critical ? 'critical' : level === 'danger' ? 'danger' : level === 'warn' ? 'warn' : 'off';
   beeper.setLevel(cfg.sound ? snd : 'off');
+  speak();
   requestAnimationFrame(frame);
 }
 
@@ -88,6 +167,8 @@ async function setMode(next) {
     detector.stop();
   }
   mode = next;
+  incident = null;
+  journal.forget();
   objects = [];
   tracker.reset();
   el('videoWrap').hidden = mode !== 'camera';
@@ -113,7 +194,54 @@ el('mapBtn').addEventListener('click', () => {
   el('mapBtn').classList.toggle('on', !el('debug').classList.toggle('off'));
 });
 
-function syncSound() { el('soundBtn').classList.toggle('on', cfg.sound); }
+function syncSound() {
+  el('soundBtn').classList.toggle('on', cfg.sound);
+  el('voiceBtn').classList.toggle('on', cfg.voice);
+}
+el('voiceBtn').addEventListener('click', () => {
+  cfg.voice = !cfg.voice;
+  saveSettings(cfg);
+  if (!cfg.voice) voice.stop();
+  voiceKey = '';
+  syncSound();
+});
+
+el('callBtn').addEventListener('click', () => callServices('button'));
+el('resolveBtn').addEventListener('click', closeIncident);
+el('reportBtn').addEventListener('click', () => { if (!incident) openIncident({ type: 'manual' }); });
+
+// ---------- журнал ----------
+const BAD = new Set(['ДТП', 'Опасное сближение', 'Красный свет', 'Опасное вождение', 'Превышение']);
+function renderLog() {
+  const box = el('logList');
+  box.innerHTML = '';
+  if (!journal.entries.length) {
+    box.innerHTML = '<div class="log-empty">Пока событий нет.</div>';
+    return;
+  }
+  for (const e of [...journal.entries].reverse()) {
+    const row = document.createElement('div');
+    row.className = 'log-row';
+    const time = document.createElement('time');
+    time.textContent = new Date(e.time).toLocaleTimeString('ru-RU');
+    const type = document.createElement('b');
+    type.textContent = e.type;
+    type.className = BAD.has(e.type) ? 'bad' : 'good';
+    const text = document.createElement('span');
+    text.textContent = e.text;
+    row.append(time, type, text);
+    box.appendChild(row);
+  }
+}
+el('logBtn').addEventListener('click', () => { renderLog(); el('journal').showModal(); });
+el('logClear').addEventListener('click', () => { journal.clear(); renderLog(); });
+el('logCsv').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([journal.toCSV()], { type: 'text/csv;charset=utf-8' }));
+  a.download = `tablo-journal-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
 el('soundBtn').addEventListener('click', () => {
   cfg.sound = !cfg.sound;
   saveSettings(cfg);
@@ -134,11 +262,13 @@ el('simbar').addEventListener('click', (e) => {
     case 'red': sim.spawnCar(cfg, { type: 'red' }); break;
     case 'weaving': sim.spawnCar(cfg, { type: 'weaving' }); break;
     case 'jam': sim.spawnJam(cfg); break;
+    case 'crash': sim.spawnCrash(cfg); break;
+    case 'hit': sim.spawnHit(cfg); break;
     case 'moose': sim.spawnAnimal(cfg, { large: true }); break;
     case 'person': sim.spawnPerson(cfg); break;
     case 'jaywalker': sim.spawnPerson(cfg, { obey: false }); break;
     case 'animal': sim.spawnAnimal(cfg); break;
-    case 'clear': sim.clear(); break;
+    case 'clear': sim.clear(); if (incident) closeIncident(); break;
     case 'auto':
       sim.auto = !sim.auto;
       el('autoBtn').classList.toggle('on', sim.auto);
@@ -171,6 +301,7 @@ const FIELDS = [
   ['laneWidth', 'Ширина полосы, м', { min: 2.5, max: 4.5, step: 0.25 }],
   ['speedLimit', 'Ограничение скорости, км/ч', { min: 10, max: 130, step: 10 }],
   ['boardDistance', 'Табло водителя — за сколько метров до перехода', { min: 20, max: 500, step: 10 }],
+  ['notifyMode', 'Оповещение служб при ДТП', { options: { button: 'по кнопке', auto: 'само' } }],
   ['camToCross', 'От камеры до перехода, м', { min: 0, max: 50, step: 1 }],
   ['camSide', 'Камера у обочины (для водителя)', { options: { right: 'правой', left: 'левой' } }],
   ['camOffset', 'Отступ камеры от края дороги, м', { min: 0, max: 10, step: 0.5 }],
@@ -246,4 +377,4 @@ el('simbar').hidden = false;
 requestAnimationFrame(frame);
 
 // для отладки и автотестов
-window.tablo = { sim, get cfg() { return cfg; }, get result() { return result; }, get objects() { return objects; } };
+window.tablo = { sim, journal, get incident() { return incident; }, get cfg() { return cfg; }, get result() { return result; }, get objects() { return objects; } };

@@ -1,4 +1,5 @@
 // Отрисовка двух табло по результату assess().
+import { incidentDetail, incidentStatus } from './incident.js';
 
 const $ = (root, sel) => root.querySelector(sel);
 
@@ -15,7 +16,27 @@ const PED_TEXT = {
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
-export function renderPedBoard(root, ped) {
+// Экран происшествия поверх табло пешехода
+function renderIncident(root, inc) {
+  const box = $(root, '.incident');
+  box.hidden = !inc;
+  if (!inc) return;
+  setText($(box, '.inc-cause'), inc.cause);
+  setText($(box, '.inc-detail'), incidentDetail(inc));
+  const done = !!inc.notified;
+  $(box, '.inc-call').hidden = done;
+  const st = $(box, '.inc-status');
+  st.hidden = !done;
+  if (done) {
+    const at = new Date(inc.notified.time).toLocaleTimeString('ru-RU');
+    const how = inc.notified.by === 'auto' ? 'автоматически' : 'по нажатию на табло';
+    setText(st, `✔ ${incidentStatus(inc)} · ${at} · ${how}`);
+  }
+}
+
+export function renderPedBoard(root, ped, incident = null) {
+  renderIncident(root, incident);
+  if (incident) { root.dataset.level = 'incident'; return; }
   const v = ped.vehicle;
   const tr = ped.traffic;
   let [head, sub] = PED_TEXT[ped.level];
@@ -105,7 +126,7 @@ export function buildLanes(root, lanes) {
   cell('side', 'right', '');
 }
 
-export function renderDrvBoard(root, drv, cfg) {
+export function renderDrvBoard(root, drv, cfg, incident = null) {
   buildLanes(root, cfg.lanes);
   const t = drv.target;
   root.dataset.level = drv.level;
@@ -115,7 +136,20 @@ export function renderDrvBoard(root, drv, cfg) {
   let sub = 'Счастливого пути';
   let where = '';
   let activeKey = null;
-  if (t) {
+  let dist = t ? t.distance : null;
+  let note = drv.vehicleSpeedKmh != null
+    ? `Скорость автомобиля: ${Math.round(drv.vehicleSpeedKmh)} км/ч${drv.speeding ? ' — ПРЕВЫШЕНИЕ' : ''}`
+    : '';
+  if (incident) {
+    root.dataset.level = 'brake';
+    root.dataset.target = 'yes';
+    head = 'ДТП ВПЕРЕДИ';
+    sub = 'СНИЗЬТЕ СКОРОСТЬ';
+    where = incident.lane ? `ПОЛОСА ${incident.lane}` : '';
+    activeKey = incident.lane ? String(incident.lane) : null;
+    dist = Math.max(0, cfg.boardDistance - incident.s);
+    note = incidentStatus(incident);
+  } else if (t) {
     const noun = NOUN[t.kind];
     const big = t.large ? 'КРУПНОЕ · ' : '';
     if (t.zone === 'road') {
@@ -137,16 +171,13 @@ export function renderDrvBoard(root, drv, cfg) {
   setText($(root, '.sub'), sub);
   setText($(root, '.where'), where);
   // расстояние округляем до 5 м — водителю не нужна ложная точность
-  setText($(root, '[data-m=dist]'), t ? String(Math.max(5, Math.round(t.distance / 5) * 5)) : '—');
-  setText($(root, '[data-m=speed]'),
-    drv.vehicleSpeedKmh != null
-      ? `Скорость автомобиля: ${Math.round(drv.vehicleSpeedKmh)} км/ч${drv.speeding ? ' — ПРЕВЫШЕНИЕ' : ''}`
-      : '');
-  $(root, '.speed').classList.toggle('over', drv.speeding);
+  setText($(root, '[data-m=dist]'), dist != null ? String(Math.max(5, Math.round(dist / 5) * 5)) : '—');
+  setText($(root, '[data-m=speed]'), note);
+  $(root, '.speed').classList.toggle('over', !incident && drv.speeding);
 
   for (const el of root.querySelectorAll('.lane')) {
     const on = el.dataset.key === activeKey;
     el.classList.toggle('active', on);
-    setText($(el, '.icon'), on ? iconOf(t) : '');
+    setText($(el, '.icon'), on ? (incident ? '⚠️' : iconOf(t)) : '');
   }
 }

@@ -14,6 +14,8 @@ export const DEFAULTS = {
   margin: 2.0,         // запас времени для пешехода, с
   minScore: 0.45,      // порог уверенности детектора
   sound: true,
+  voice: true,          // голосовые объявления
+  notifyMode: 'button', // оповещение служб при ДТП: 'button' — по нажатию на табло, 'auto' — само
 };
 
 const KEY = 'tablo.settings.v1';

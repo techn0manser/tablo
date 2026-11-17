@@ -21,6 +21,8 @@
   <span class="spacer"></span>
   <button id="mapBtn" class="tool on">Схема</button>
   <button id="soundBtn" class="tool on">Звук</button>
+  <button id="voiceBtn" class="tool on">Голос</button>
+  <button id="logBtn" class="tool">Журнал</button>
   <button id="fsBtn" class="tool">Весь экран</button>
   <button id="setBtn" class="tool">Настройки</button>
 </header>
@@ -40,6 +42,20 @@
       </div>
       <div class="approach" aria-hidden="true"><i class="car" hidden></i><i class="zebra"></i></div>
       <div class="foot"></div>
+      <button class="report" id="reportBtn">Сообщить о ДТП</button>
+
+      <div class="incident" hidden>
+        <div class="board-title">Происшествие</div>
+        <div class="inc-head">ДТП!</div>
+        <div class="inc-cause"></div>
+        <div class="inc-detail"></div>
+        <button class="inc-call" id="callBtn">ВЫЗВАТЬ ЭКСТРЕННЫЕ СЛУЖБЫ</button>
+        <div class="inc-status" hidden></div>
+        <div class="inc-foot">
+          <span>Макет: настоящий вызов не выполняется</span>
+          <button id="resolveBtn">Происшествие устранено</button>
+        </div>
+      </div>
     </section>
 
     <section class="board drv" id="drvBoard" data-level="clear">
@@ -61,6 +77,8 @@
       <button data-spawn="red">+ На красный</button>
       <button data-spawn="weaving">+ Виляет</button>
       <button data-spawn="jam">Пробка</button>
+      <button data-spawn="crash">Авария</button>
+      <button data-spawn="hit">Наезд</button>
       <button data-spawn="person">+ Пешеход</button>
       <button data-spawn="jaywalker">+ Невнимательный</button>
       <button data-spawn="animal">+ Собака</button>
@@ -97,6 +115,18 @@
       <button type="button" id="calibBtn">Калибровка по человеку</button>
       <button type="button" id="resetBtn">Сбросить</button>
       <button class="primary" value="ok">Готово</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="journal">
+  <form method="dialog">
+    <h2>Журнал событий</h2>
+    <div id="logList" class="log"></div>
+    <div class="dlg-row">
+      <button type="button" id="logCsv">Скачать CSV</button>
+      <button type="button" id="logClear">Очистить</button>
+      <button class="primary" value="ok">Закрыть</button>
     </div>
   </form>
 </dialog>
