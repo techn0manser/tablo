@@ -1,0 +1,11 @@
+{
+  "name": "tablo",
+  "version": "0.1.0",
+  "description": "Макет умных табло для пешеходного перехода",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080"
+  }
+}

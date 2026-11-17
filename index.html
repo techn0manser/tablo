@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f12">
+<title>Табло — умный пешеходный переход</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="seg" id="modeSeg" role="group" aria-label="Источник данных">
+    <button data-mode="sim" class="on">Симуляция</button>
+    <button data-mode="camera">Камера</button>
+  </div>
+  <div class="seg" id="viewSeg" role="group" aria-label="Какое табло показывать">
+    <button data-view="ped">Пешеход</button>
+    <button data-view="drv">Водитель</button>
+    <button data-view="both" class="on">Оба</button>
+  </div>
+  <span class="spacer"></span>
+  <button id="mapBtn" class="tool on">Схема</button>
+  <button id="soundBtn" class="tool on">Звук</button>
+  <button id="fsBtn" class="tool">Весь экран</button>
+  <button id="setBtn" class="tool">Настройки</button>
+</header>
+
+<main>
+  <div class="boards" id="boards" data-view="both">
+    <section class="board ped" id="pedBoard" data-level="clear">
+      <div class="board-title">Табло для пешехода</div>
+      <div class="headline">МАШИН НЕТ</div>
+      <div class="sub"></div>
+      <div class="metrics">
+        <div class="metric"><b data-m="speed">—</b><span>км/ч</span><small>скорость</small></div>
+        <div class="metric"><b data-m="dist">—</b><span>м</span><small>до машины</small></div>
+        <div class="metric"><b data-m="ttc">—</b><span>с</span><small>до перехода</small></div>
+      </div>
+      <div class="approach" aria-hidden="true"><i class="car" hidden></i><i class="zebra"></i></div>
+      <div class="foot"></div>
+    </section>
+
+    <section class="board drv" id="drvBoard" data-level="clear">
+      <div class="board-title">Табло для водителя</div>
+      <div class="headline">ПЕРЕХОД СВОБОДЕН</div>
+      <div class="distance">ЧЕРЕЗ <b data-m="dist">—</b> м</div>
+      <div class="lanes" aria-hidden="true"></div>
+      <div class="where"></div>
+      <div class="sub"></div>
+      <div class="speed" data-m="speed"></div>
+    </section>
+  </div>
+
+  <aside class="debug" id="debug">
+    <div class="simbar" id="simbar">
+      <button data-spawn="car">+ Машина</button>
+      <button data-spawn="reckless">+ Лихач</button>
+      <button data-spawn="person">+ Пешеход</button>
+      <button data-spawn="jaywalker">+ Невнимательный</button>
+      <button data-spawn="animal">+ Собака</button>
+      <button data-spawn="auto" id="autoBtn">Авто</button>
+      <button data-spawn="clear">Очистить</button>
+    </div>
+    <div class="debug-body">
+      <div class="video-wrap" id="videoWrap" hidden>
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <canvas id="map"></canvas>
+    </div>
+    <div class="status" id="status"></div>
+  </aside>
+</main>
+
+<div class="start" id="start">
+  <div class="start-card">
+    <h1>Умный пешеходный переход</h1>
+    <p>Макет двух табло: одно предупреждает пешехода о приближающейся машине, другое — водителя о человеке или животном на дороге.</p>
+    <button id="startSim" class="primary">Запустить симуляцию</button>
+    <button id="startCam">Запустить с камерой</button>
+    <p class="hint">Для режима камеры поставьте телефон в 5–10 м за переходом объективом навстречу машинам.</p>
+  </div>
+</div>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h2>Настройки</h2>
+    <div id="fields"></div>
+    <div class="dlg-row">
+      <button type="button" id="calibBtn">Калибровка по человеку</button>
+      <button type="button" id="resetBtn">Сбросить</button>
+      <button class="primary" value="ok">Готово</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
