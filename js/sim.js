@@ -121,6 +121,34 @@ export class Simulator {
     });
   }
 
+  // Группа пешеходов, растянувшаяся по нескольким полосам
+  spawnGroup(cfg) {
+    const w = roadWidth(cfg);
+    const n = 3 + Math.floor(Math.random() * 3);
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      this.objects.push({
+        id: this.nextId++, kind: 'person', cls: 'person', label: 'Пешеход',
+        s: rand(-2, 2), u: rand(0.3, w - 0.3), vs: 0, vu: 0,
+        dir, speed: rand(0.9, 1.3), obey: false, state: 'go', wait: 0,
+      });
+    }
+  }
+
+  // Стадо крупных животных поперёк всех полос
+  spawnHerd(cfg) {
+    const w = roadWidth(cfg);
+    const s0 = rand(40, 70);
+    const n = cfg.lanes + 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < n; i++) {
+      this.objects.push({
+        id: this.nextId++, kind: 'animal', cls: 'cow', label: 'Корова', large: true,
+        s: s0 + rand(-4, 4), u: ((i + 0.5) / n) * w, vs: 0, vu: 0,
+        dir: 1, speed: rand(0.15, 0.35), obey: false, state: 'go', wait: 0,
+      });
+    }
+  }
+
   spawnAnimal(cfg, { large = false } = {}) {
     const fromRight = Math.random() < 0.5;
     this.objects.push({

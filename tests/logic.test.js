@@ -273,3 +273,46 @@ test('журнал: без повторов, с ограничением и вы
   for (let i = 0; i < 400; i++) j.add('x', String(i));
   assert.equal(j.entries.length, 300);
 });
+
+test('водитель: люди и животные на нескольких полосах одновременно', () => {
+  const c3 = { ...cfg, lanes: 3 };
+  const objs = [
+    { ...person(1, 0), id: 1 },                       // полоса 1
+    { ...person(1.5, 1), id: 2 },                     // полоса 1, второй
+    { ...person(8, 0), id: 3 },                       // полоса 3
+    { id: 4, kind: 'animal', label: 'Корова', large: true, s: 40, u: 5, vs: 0, vu: 0 }, // полоса 2, ближе к табло
+    { ...person(-1.5, 0), id: 5 },                    // у правой обочины
+  ];
+  const r = assess(objs, c3).drv;
+  assert.equal(r.all.length, 5);
+  assert.deepEqual(r.summary.roadLanes, [1, 2, 3]);
+  assert.equal(r.summary.allLanes, true);
+  assert.equal(r.summary.people, 3);
+  assert.equal(r.summary.animals, 1);
+  assert.equal(r.summary.roadside, 1);
+  assert.equal(r.lanes['1'].count, 2);
+  assert.equal(r.lanes['2'].large, true);
+  assert.equal(r.lanes['2'].distance, 60);
+  assert.equal(r.lanes.right.count, 1);
+  assert.equal(r.target.id, 4); // главная цель — ближайшая к табло на дороге
+  // две полосы из трёх
+  const two = assess(objs.slice(0, 3), c3).drv.summary;
+  assert.deepEqual(two.roadLanes, [1, 3]);
+  assert.equal(two.allLanes, false);
+});
+
+test('пешеход: в списке все машины, включая стоящие', () => {
+  const objs = [
+    { ...car(40, 30), id: 1, color: 'белый' },
+    { ...car(150, 90, 5), id: 2 },
+    { ...car(8, 0, 5), id: 3 },
+    { ...car(170, 50), id: 4 },
+  ];
+  const list = assess(objs, cfg).ped.vehicles;
+  assert.equal(list.length, 4);
+  assert.equal(list[0].id, 1);           // самая опасная — первая
+  assert.equal(list[3].id, 3);           // стоящая — в конце
+  assert.equal(list[3].stopped, true);
+  assert.equal(list.find((c) => c.id === 2).lane, 2);
+  assert.equal(list.find((c) => c.id === 2).speeding, true);
+});

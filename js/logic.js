@@ -87,11 +87,21 @@ export function assess(objects, cfg) {
   // ---------- Табло пешехода ----------
   // Каждая приближающаяся машина оценивается отдельно, на табло — самая опасная.
   let threat = null;
-  let hazard = null; // ближайший опасный водитель — показывается, даже если главная угроза не он
+  let hazard = null;
+  const list = []; // все машины в поле распознавания — для списка на табло пешехода // ближайший опасный водитель — показывается, даже если главная угроза не он
   let moving = 0;
   let speedingCount = 0;
   for (const v of vehicles) {
-    if (v.vs <= MOVING || v.s <= 0) continue;
+    if (v.vs <= MOVING || v.s <= 0) {
+      // стоит или уже на переходе — опасности не несёт, но в списке показывается
+      list.push({
+        id: v.id, label: v.label, color: v.color || null, colorCss: v.colorCss || null,
+        distance: Math.max(0, v.s), speedKmh: Math.max(0, v.vs) * KMH, ttc: null, lvl: 0,
+        stopped: v.vs <= MOVING, speeding: false, weaving: !!v.weaving, ranRed: !!v.ranRed,
+        reckless: false, lane: laneOf(v.u, cfg),
+      });
+      continue;
+    }
     moving++;
     const ttc = v.s / v.vs;
     const speedKmh = v.vs * KMH;
@@ -113,7 +123,9 @@ export function assess(objects, cfg) {
         // куда машина приедет на линии перехода (прогноз траектории)
         uAtCross: v.u + (v.vu || 0) * ttc,
         lane: laneOf(v.u, cfg),
+        stopped: false,
     };
+    list.push(info);
     if (!threat || lvl > threat.lvl || (lvl === threat.lvl && ttc < threat.ttc)) threat = info;
     if (reckless && (!hazard || ttc < hazard.ttc)) hazard = info;
   }
@@ -129,6 +141,8 @@ export function assess(objects, cfg) {
     level: pedLevel,
     critical: pedLevel === 'danger' && peopleOnRoad,
     vehicle: threat,
+    // сначала самые опасные, внутри уровня — кто раньше доедет; стоящие в конце
+    vehicles: list.sort((a, b) => b.lvl - a.lvl || (a.ttc ?? 1e9) - (b.ttc ?? 1e9) || a.distance - b.distance),
     hazard: hazard && hazard.id !== threat.id ? hazard : null,
     stopped: stoppedCount > 0,
     crossTime: tCross,
@@ -143,12 +157,13 @@ export function assess(objects, cfg) {
   };
 
   // ---------- Табло водителя ----------
-  let target = null;
+  // Учитываются все люди и животные: на скольких угодно полосах одновременно.
+  const all = [];
   for (const b of beings) {
     const zone = zoneOf(b.u, cfg);
     if (zone === 'away') continue;
     if (b.s < -5 || b.s > cfg.boardDistance) continue;
-    const cand = {
+    all.push({
       id: b.id,
       kind: b.kind,
       label: b.label,
@@ -158,14 +173,36 @@ export function assess(objects, cfg) {
       side: b.u < 0 ? 'right' : 'left', // для зоны 'roadside': у какой обочины
       s: b.s,
       distance: Math.max(0, cfg.boardDistance - b.s),
-    };
-    // приоритет: на дороге важнее, чем у дороги; затем — ближайший к табло
-    const better =
-      !target ||
-      (cand.zone === 'road' && target.zone !== 'road') ||
-      (cand.zone === target.zone && cand.distance < target.distance);
-    if (better) target = cand;
+    });
   }
+  // главная цель: на дороге важнее, чем у дороги; затем — ближайшая к табло
+  all.sort((x, y) => (x.zone === 'road' ? 0 : 1) - (y.zone === 'road' ? 0 : 1) || x.distance - y.distance);
+  const target = all[0] || null;
+
+  // занятость полос и обочин: ключ — номер полосы или 'left' / 'right'
+  const lanes = {};
+  for (const b of all) {
+    const key = b.zone === 'road' ? String(b.lane) : b.side;
+    const c = (lanes[key] ||= { key, zone: b.zone, count: 0, people: 0, animals: 0, large: false, distance: Infinity });
+    c.count++;
+    if (b.kind === 'person') c.people++;
+    else c.animals++;
+    if (b.large) c.large = true;
+    c.distance = Math.min(c.distance, b.distance);
+  }
+  const roadLanes = Object.values(lanes)
+    .filter((c) => c.zone === 'road')
+    .map((c) => Number(c.key))
+    .sort((x, y) => x - y);
+  const onRoad = all.filter((b) => b.zone === 'road');
+  const summary = {
+    people: onRoad.filter((b) => b.kind === 'person').length,
+    animals: onRoad.filter((b) => b.kind === 'animal').length,
+    large: onRoad.some((b) => b.large),
+    roadside: all.length - onRoad.length,
+    roadLanes,
+    allLanes: roadLanes.length === cfg.lanes,
+  };
 
   // ближайшая машина, которая ещё не доехала до цели (или до перехода, если цели нет)
   const ref = target ? target.s : 0;
@@ -188,7 +225,7 @@ export function assess(objects, cfg) {
   } else if (speeding) {
     drvLevel = 'caution';
   }
-  const drv = { level: drvLevel, target, vehicleSpeedKmh, speeding };
+  const drv = { level: drvLevel, target, all, lanes, summary, vehicleSpeedKmh, speeding };
 
   return { ped, drv };
 }

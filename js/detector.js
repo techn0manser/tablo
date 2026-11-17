@@ -53,6 +53,6 @@ export class Detector {
 
   async detect(minScore) {
     if (!this.running || this.video.readyState < 2) return [];
-    return this.model.detect(this.video, 20, Math.min(minScore, 0.3));
+    return this.model.detect(this.video, 50, Math.min(minScore, 0.3));
   }
 }
