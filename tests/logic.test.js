@@ -208,3 +208,68 @@ test('опасный водитель виден на табло, даже ес�
   assert.equal(r.ped.hazard.weaving, true);
   assert.equal(assess([{ ...car(150, 45), id: 2, weaving: true }], cfg).ped.hazard, null);
 });
+
+test('ДТП: наезд на пешехода, причины и службы', async () => {
+  const { detectCollision, makeIncident, notifyServices, incidentDetail, incidentStatus, incidentSpeech } = await import('../js/incident.js');
+  const v = { ...car(1, 83, 5), id: 1, color: 'красный', ranRed: true };
+  const p = { ...person(5, 0), id: 2 };
+  assert.equal(detectCollision([{ ...v, s: 30 }, p], cfg), null);            // ещё далеко
+  assert.equal(detectCollision([{ ...v, u: 1.75 }, p], cfg), null);          // другая полоса
+  assert.equal(detectCollision([{ ...v, vs: 1 }, p], cfg), null);            // почти стоит
+  assert.equal(detectCollision([v, { ...p, u: -1 }], cfg), null);            // человек на обочине
+  const c = detectCollision([v, p], cfg);
+  assert.equal(c.type, 'person');
+  const inc = makeIncident(c, cfg, 1000);
+  assert.match(inc.cause, /Сбит пешеход/);
+  assert.equal(inc.lane, 2);
+  assert.equal(incidentDetail(inc), 'Красный автомобиль · 83 км/ч · полоса 2 · проехал на красный свет, превышал скорость');
+  assert.equal(inc.notified, null);
+  assert.match(incidentSpeech(inc), /Нажмите кнопку/);
+  notifyServices(inc, 'button', 2000);
+  assert.equal(incidentStatus(inc), 'ДПС и скорая помощь оповещены');
+  assert.match(incidentSpeech(inc), /ДПС и скорая помощь оповещены/);
+  // уже лежащего пострадавшего повторно не «сбивают»
+  assert.equal(detectCollision([v, { ...p, down: true }], cfg), null);
+});
+
+test('ДТП: столкновение машин и животное', async () => {
+  const { detectCollision, makeIncident } = await import('../js/incident.js');
+  const a = { ...car(42, 80), id: 1 };
+  const b = { ...car(40, 0), id: 2 };
+  assert.equal(detectCollision([a, b], cfg).type, 'crash');
+  assert.equal(detectCollision([a, b], cfg, { vehicles: false }), null);
+  assert.equal(detectCollision([{ ...car(42, 6) }, { ...car(40, 5), id: 2 }], cfg), null); // пробка — не авария
+  const moose = { id: 3, kind: 'animal', label: 'Лось', large: true, s: 41, u: 1.75, vs: 0, vu: 0 };
+  const inc = makeIncident(detectCollision([a, moose], cfg), cfg);
+  assert.equal(inc.cause, 'Сбито крупное животное');
+  assert.equal(inc.services, 'ДПС');
+});
+
+test('симуляция: сценарий аварии заканчивается столкновением', async () => {
+  const { detectCollision } = await import('../js/incident.js');
+  const sim = new Simulator();
+  sim.spawnCrash(cfg);
+  let c = null;
+  for (let i = 0; i < 60 * 15 && !c; i++) { sim.step(1 / 60, cfg, 'clear'); c = detectCollision(sim.objects, cfg); }
+  assert.equal(c?.type, 'crash');
+  sim.applyCollision(c);
+  sim.step(1 / 60, cfg, 'clear');
+  assert.equal(sim.objects.filter((o) => o.crashed).length, 2);
+  assert.equal(detectCollision(sim.objects, cfg), null);
+  sim.clearIncident();
+  assert.equal(sim.objects.length, 0);
+});
+
+test('журнал: без повторов, с ограничением и выгрузкой', async () => {
+  const { Journal } = await import('../js/journal.js');
+  const mem = { d: {}, getItem(k) { return this.d[k] ?? null; }, setItem(k, v) { this.d[k] = v; } };
+  const j = new Journal(mem);
+  assert.equal(j.add('Превышение', 'красный автомобиль: 83 км/ч', { key: 'a', time: 0 }), true);
+  assert.equal(j.add('Превышение', 'красный автомобиль: 85 км/ч', { key: 'a' }), false);
+  j.add('ДТП', 'Сбит "пешеход"');
+  assert.equal(j.entries.length, 2);
+  assert.equal(new Journal(mem).entries.length, 2); // сохраняется между запусками
+  assert.match(j.toCSV(), /"ДТП";"Сбит ""пешеход"""/);
+  for (let i = 0; i < 400; i++) j.add('x', String(i));
+  assert.equal(j.entries.length, 300);
+});

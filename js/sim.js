@@ -60,6 +60,58 @@ export class Simulator {
     }
   }
 
+  // Сценарий аварии: сломанная машина стоит на полосе, сзади в неё едет невнимательный водитель
+  spawnCrash(cfg) {
+    const lane = 1 + Math.floor(Math.random() * cfg.lanes);
+    const u = (lane - 0.5) * cfg.laneWidth;
+    this.objects = this.objects.filter((o) => o.kind !== 'vehicle' || Math.abs(o.u - u) > 1.5);
+    const mk = (s, kmh, extra) => {
+      const [color, colorCss] = pick(COLORS);
+      this.objects.push({
+        id: this.nextId++, kind: 'vehicle', cls: 'car', label: 'Автомобиль', color, colorCss,
+        s, u, vs: kmh / 3.6, vu: 0, target: kmh / 3.6,
+        reckless: false, ranRed: false, weave: null, weaving: false, ...extra,
+      });
+    };
+    mk(rand(35, 60), 0, {});
+    mk(130, rand(70, 85), { reckless: true, blind: true });
+  }
+
+  // Сценарий наезда: пешеход выходит на дорогу прямо перед лихачом
+  spawnHit(cfg) {
+    const [color, colorCss] = pick(COLORS);
+    const u = 0.5 * cfg.laneWidth;
+    const speed = 1.3;
+    const v = (cfg.speedLimit + 25) / 3.6;
+    this.objects.push({
+      id: this.nextId++, kind: 'person', cls: 'person', label: 'Пешеход',
+      s: 0, u: -2, vs: 0, vu: 0, dir: 1, speed, obey: false, state: 'go', wait: 0,
+    });
+    this.objects.push({
+      id: this.nextId++, kind: 'vehicle', cls: 'car', label: 'Автомобиль', color, colorCss,
+      s: v * ((u + 2) / speed), u, vs: v, vu: 0, target: v,
+      reckless: true, ranRed: false, weave: null, weaving: false,
+    });
+  }
+
+  // Последствия столкновения, найденного detectCollision()
+  applyCollision(c) {
+    const find = (x) => this.objects.find((o) => o.id === x.id);
+    const v = find(c.vehicle);
+    const o = find(c.other);
+    if (c.type === 'crash') {
+      for (const x of [v, o]) if (x) { x.crashed = true; x.vs = 0; x.target = 0; x.weave = null; }
+    } else {
+      if (o) { o.down = true; o.state = 'down'; o.vu = 0; }
+      if (v) { v.target = 0; v.reckless = false; v.blind = false; v.weave = null; } // сбивший останавливается
+    }
+  }
+
+  // Происшествие устранено: убрать пострадавших и разбитые машины
+  clearIncident() {
+    this.objects = this.objects.filter((o) => !o.down && !o.crashed && !(o.kind === 'vehicle' && o.target === 0));
+  }
+
   spawnPerson(cfg, { obey = true } = {}) {
     const fromRight = Math.random() < 0.5;
     this.objects.push({
@@ -102,17 +154,21 @@ export class Simulator {
     for (const o of this.objects) {
       if (o.kind === 'vehicle') {
         // ближайшая точка, перед которой надо остановиться
+        if (o.crashed) { o.vs = 0; continue; }
         let gap = Infinity;
-        if (!o.reckless) {
-          for (const p of onRoad) if (p.s < o.s - 1) gap = Math.min(gap, o.s - (p.s + 4));
+        // лихач не тормозит перед идущими, но лежащего на дороге объезжать не станет
+        for (const p of onRoad) {
+          if ((!o.reckless || p.down) && p.s < o.s - 1) gap = Math.min(gap, o.s - (p.s + 4));
         }
         for (const c of cars) {
-          if (c !== o && Math.abs(c.u - o.u) < 1.5 && c.s < o.s && c.vs < o.vs) {
+          if (!o.blind && c !== o && Math.abs(c.u - o.u) < 1.5 && c.s < o.s && c.vs < o.vs) {
             gap = Math.min(gap, o.s - (c.s + 7));
           }
         }
         const allowed = Math.sqrt(2 * 2.5 * Math.max(gap, 0));
-        if (o.vs > allowed) {
+        if (o.vs > o.target) {
+          o.vs = Math.max(o.target, o.vs - 7 * dt); // экстренное торможение после наезда
+        } else if (o.vs > allowed) {
           const need = gap > 0.1 ? (o.vs * o.vs) / (2 * gap) : 8;
           o.vs = Math.max(0, o.vs - Math.min(8, Math.max(need, 2.5)) * dt);
         } else {
@@ -128,7 +184,9 @@ export class Simulator {
         // виляние определяется тем же алгоритмом, что и в режиме камеры
         o.weaving = updateWeaving(o, this.t);
       } else {
-        if (o.state === 'wait') {
+        if (o.down) {
+          o.vu = 0;
+        } else if (o.state === 'wait') {
           o.wait -= dt;
           const free = pedLevel === 'clear' || pedLevel === 'info';
           if (o.wait <= 0 && (!o.obey || free)) o.state = 'go';
@@ -141,7 +199,7 @@ export class Simulator {
     }
 
     this.objects = this.objects.filter((o) =>
-      o.kind === 'vehicle' ? o.s > -40 : o.u > -3.5 && o.u < w + 3.5);
+      o.kind === 'vehicle' ? o.s > -40 : o.down || (o.u > -3.5 && o.u < w + 3.5));
     return this.objects;
   }
 }
