@@ -32,9 +32,4 @@ export function saveSettings(cfg) {
   try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch { /* приватный режим */ }
 }
 
-{
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  }
-}
+
